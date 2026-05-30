@@ -6,8 +6,9 @@ authors = ["Lixtr <spetesq@gmail.com>"]
 description = "A minimalist CLI tool to collect words into decks"
 license = "MIT"
 readme = "readme.md"
+repository = "https://github.com/spetesq-sketch/word-saver"
 keywords = ["vocabulary", "clipboard", "anki", "cli", "language-learning"]
-categories = ["command-line-utilities", "text-processing", "education"]
+categories = ["command-line-utilities", "text-processing"]
 
 
 [[bin]]
