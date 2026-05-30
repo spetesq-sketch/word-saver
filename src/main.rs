@@ -5,6 +5,9 @@ use std::env;
 use std::fs;
 use std::io::{Write, stdin, stdout};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::Duration;
 
 #[derive(Parser)]
 #[command(name = "Ws", version, about = "a tiny program to keep words")]
@@ -39,6 +42,10 @@ enum Command {
     #[command(alias = "-n")]
     /// create a new session
     New { name: String },
+
+    #[command(alias = "-l")]
+    /// listen the clipboard and automatically add words from the clipboard.
+    Listen,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -87,12 +94,12 @@ impl Config {
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     let mut config = Config::load()?;
+    let current = &config.active_session;
 
     if args.is_empty() {
         run_loop(&config)?;
     } else {
         let cli = Cli::parse();
-        let current = &config.active_session;
         match cli.command {
             Command::All => print_all_w(None, current)?,
             Command::Clear => clear_all(current)?,
@@ -154,6 +161,7 @@ fn main() -> Result<()> {
                 }
                 println!();
             }
+            Command::Listen => listen_to_clipboard(&config)?,
         }
     }
 
@@ -221,6 +229,93 @@ fn print_all_w(w: Option<&Words>, session_name: &str) -> Result<()> {
 fn clear_all(session_name: &str) -> Result<()> {
     let w = Words { words: vec![] };
     w.save_words(session_name)?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+use std::process::Command as CdmCommand;
+#[cfg(target_os = "linux")]
+fn get_clipboard_text() -> Option<String> {
+    if let Ok(output) = CdmCommand::new("wl-paste").arg("-n").output() {
+        if output.status.success() {
+            if let Ok(text) = String::from_utf8(output.stdout) {
+                return Some(text.trim().to_string());
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        }
+    } else if let Ok(output) = CdmCommand::new("xclip")
+        .args(["-selection", "clipboard", "-o"])
+        .output()
+    {
+        if output.status.success() {
+            if let Ok(text) = String::from_utf8(output.stdout) {
+                return Some(text.trim().to_string());
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+use arboard::Clipboard;
+#[cfg(not(target_os = "linux"))]
+fn get_clipboard_text() -> Option<String> {
+    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+        if let Ok(text) = clipboard.get_text() {
+            return Some(text.trim().to_string());
+        }
+    }
+    None
+}
+
+fn listen_to_clipboard(config: &Config) -> Result<()> {
+    let current_session = &config.active_session;
+    let mut words: Arc<Mutex<Words>> = Arc::new(Mutex::new(Words::load_words(current_session)?));
+    println!("Active session: {}", current_session);
+
+    let thread_handle = thread::spawn(move || {
+        let words_thread = Arc::clone(&words);
+        let mut last_copied = get_clipboard_text().unwrap_or_default();
+        loop {
+            if let Some(clipboard_text) = get_clipboard_text() {
+                if !clipboard_text.is_empty()
+                    && clipboard_text != last_copied
+                    && !clipboard_text.contains('\n')
+                {
+                    last_copied = clipboard_text.clone();
+
+                    let mut words_guard = words_thread.lock().unwrap();
+
+                    if !words_guard.words.contains(&clipboard_text) {
+                        words_guard.add_word(clipboard_text.clone());
+                        println!("Added: {}", clipboard_text);
+                    }
+                }
+            }
+
+            std::thread::sleep(Duration::from_secs_f32(2.0));
+        }
+    });
+    loop {
+        let user_input = input("enter q! to stop")?;
+        match user_input.as_str() {
+            "q!" => {
+                break;
+            }
+            _ => {}
+        }
+    }
+    thread_handle.join().unwrap();
+    let words_final = words.lock().unwrap();
+    words_final.save_words(current_session)?;
     Ok(())
 }
 
