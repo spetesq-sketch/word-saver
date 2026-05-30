@@ -1,3 +1,4 @@
+use anyhow::bail;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
@@ -29,6 +30,10 @@ enum Command {
     /// change active session
     ChangeSession { name: String },
 
+    /// delite session toml or -rs
+    #[command(alias = "-rs")]
+    RemoveSession { name: String },
+
     /// clear all words or -c
     #[command(alias = "-c")]
     Clear,
@@ -45,7 +50,7 @@ enum Command {
     New { name: String },
 
     #[command(alias = "-l")]
-    /// listen the clipboard and automatically add words from the clipboard.
+    /// listen the clipboard and automatically add words from the clipboard
     Listen,
 }
 
@@ -163,6 +168,15 @@ fn main() -> Result<()> {
                 println!();
             }
             Command::Listen => listen_to_clipboard(&config)?,
+            Command::RemoveSession { name } => {
+                let path = get_session_path(&name)?;
+                if !path.exists() {
+                    bail!("session doesnt exist")
+                }
+                fs::remove_file(&path)
+                    .with_context(|| format!("failed to remove: {}", &path.display()))?;
+                println!("Session: {} removed", name);
+            }
         }
     }
 
