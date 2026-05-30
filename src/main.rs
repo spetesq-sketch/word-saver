@@ -23,16 +23,16 @@ enum Command {
     #[command(alias = "-a")]
     All,
 
-    #[command(alias = "-as")]
-    /// print all sessions or -as
-    AllSession,
-    #[command(alias = "-cs")]
-    /// change active session
-    ChangeSession { name: String },
+    #[command(alias = "-ad")]
+    /// print all decks or -as
+    AllDecks,
+    #[command(alias = "-cd")]
+    /// change active deck
+    ChangeDeck { name: String },
 
-    /// delite session toml or -rs
-    #[command(alias = "-rs")]
-    RemoveSession { name: String },
+    /// delite deck toml or -rs
+    #[command(alias = "-rd")]
+    RemoveDeck { name: String },
 
     /// clear all words or -c
     #[command(alias = "-c")]
@@ -43,29 +43,31 @@ enum Command {
     Remove { word: String },
 
     /// add word if dont want to run loop
-    Add { word: String },
+    Add { word: Vec<String> },
 
     #[command(alias = "-n")]
-    /// create a new session
+    /// create a new deck or -n
     New { name: String },
 
     #[command(alias = "-l")]
-    /// listen the clipboard and automatically add words from the clipboard
+    /// listen to the clipboard and automatically add words from the clipboard or -l
     Listen,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 struct Config {
-    active_session: String,
+    active_deck: String,
     loop_message: String,
     auto_switch: bool,
+    seconds_check_clipboard: f32,
 }
 impl Default for Config {
     fn default() -> Self {
         Self {
-            active_session: "default".to_string(),
+            active_deck: "default".to_string(),
             loop_message: "enter a word or q! - exit and save a! - print all words > ".to_string(),
             auto_switch: true,
+            seconds_check_clipboard: 1.5,
         }
     }
 }
@@ -92,7 +94,26 @@ impl Config {
     fn save(&self) -> Result<()> {
         let path = Self::get_path()?;
         let content = toml::to_string_pretty(self)?;
-        fs::write(&path, content)?;
+
+        let commented_content = content
+            .replace(
+                "active_deck =",
+                "# The current active deck where all words are saved\nactive_deck ="
+            )
+            .replace(
+                "loop_message =",
+                "# Prompt for interactive input (ws)\nloop_message ="
+            )
+            .replace(
+                "auto_switch =",
+                "# Automatically switch to the newly created deck (true/false)\nauto_switch ="
+            )
+            .replace(
+                "seconds_check_clipboard =",
+                "# Clipboard check interval in listen mode (-l) in seconds\nseconds_check_clipboard ="
+            );
+
+        fs::write(&path, commented_content)?;
         Ok(())
     }
 }
@@ -100,7 +121,7 @@ impl Config {
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     let mut config = Config::load()?;
-    let current = &config.active_session;
+    let current = &config.active_deck;
 
     if args.is_empty() {
         run_loop(&config)?;
@@ -110,8 +131,9 @@ fn main() -> Result<()> {
             Command::All => print_all_w(None, current)?,
             Command::Clear => clear_all(current)?,
             Command::Add { word } => {
+                let final_phase = word.join(" ");
                 let mut words = Words::load_words(current)?;
-                words.add_word(word);
+                words.add_word(final_phase);
                 words.save_words(current)?;
             }
             Command::Remove { word } => {
@@ -124,35 +146,35 @@ fn main() -> Result<()> {
                 }
             }
             Command::New { name } => {
-                let path = get_session_path(&name)?;
+                let path = get_deck_path(&name)?;
                 if path.exists() {
-                    println!("Error: Session '{}' already exists!", name);
+                    println!("Error: Deck '{}' already exists!", name);
                 } else {
                     let words = Words { words: Vec::new() };
                     words.save_words(&name)?;
-                    println!("Session: {} created", name);
+                    println!("Deck: {} created", name);
                     if config.auto_switch {
-                        config.active_session = name.clone();
-                        println!("Switched to session: {}", name);
+                        config.active_deck = name.clone();
+                        println!("Switched to deck: {}", name);
                         config.save()?;
                     }
                 }
             }
-            Command::ChangeSession { name } => {
-                let path = get_session_path(&name)?;
+            Command::ChangeDeck { name } => {
+                let path = get_deck_path(&name)?;
                 if !path.exists() {
-                    println!("Session '{}' does not exist. Use -n to create it.", name);
+                    println!("Deck '{}' does not exist. Use -n to create it.", name);
                 } else {
-                    config.active_session = name.clone();
+                    config.active_deck = name.clone();
                     config.save()?;
-                    println!("Switched to session '{}'.", name);
+                    println!("Switched to deck '{}'.", name);
                 }
             }
-            Command::AllSession => {
+            Command::AllDecks => {
                 let path = dirs::data_local_dir()
                     .context("failed to get local data dir")?
                     .join("words_saver");
-                println!("\nAvailable sessions:");
+                println!("\nAvailable decks:");
                 if path.exists() {
                     for entry in fs::read_dir(path)? {
                         let entry = entry?;
@@ -168,14 +190,14 @@ fn main() -> Result<()> {
                 println!();
             }
             Command::Listen => listen_to_clipboard(&config)?,
-            Command::RemoveSession { name } => {
-                let path = get_session_path(&name)?;
+            Command::RemoveDeck { name } => {
+                let path = get_deck_path(&name)?;
                 if !path.exists() {
-                    bail!("session doesnt exist")
+                    bail!("deck doesnt exist")
                 }
                 fs::remove_file(&path)
                     .with_context(|| format!("failed to remove: {}", &path.display()))?;
-                println!("Session: {} removed", name);
+                println!("Deck: {} removed", name);
             }
         }
     }
@@ -193,8 +215,8 @@ impl Words {
         self.words.retain(|w| w != word_to_remove);
         self.words.len() < original_len
     }
-    fn load_words(session_name: &str) -> Result<Self> {
-        let data_path = get_session_path(session_name)?;
+    fn load_words(deck_name: &str) -> Result<Self> {
+        let data_path = get_deck_path(deck_name)?;
         if !data_path.exists() {
             return Ok(Words { words: vec![] });
         }
@@ -202,8 +224,8 @@ impl Words {
         let words = toml::from_str(&content).context("failed to parse string to toml")?;
         Ok(words)
     }
-    fn save_words(&self, session_name: &str) -> Result<()> {
-        let data_path = get_session_path(session_name)?;
+    fn save_words(&self, deck_name: &str) -> Result<()> {
+        let data_path = get_deck_path(deck_name)?;
         let string_content =
             toml::to_string_pretty(&self).context("failed to parse toml to string")?;
         fs::write(&data_path, &string_content).context("failed to write data")?;
@@ -214,25 +236,25 @@ impl Words {
     }
 }
 
-fn get_session_path(name: &str) -> Result<PathBuf> {
+fn get_deck_path(name: &str) -> Result<PathBuf> {
     let path_folder = dirs::data_local_dir()
         .context("folder not found")?
         .join("words_saver");
     fs::create_dir_all(&path_folder)?;
     Ok(path_folder.join(format!("{}.toml", name,)))
 }
-fn print_all_w(w: Option<&Words>, session_name: &str) -> Result<()> {
+fn print_all_w(w: Option<&Words>, deck_name: &str) -> Result<()> {
     let loaded;
     let words = match w {
         None => {
-            loaded = Words::load_words(session_name)?;
+            loaded = Words::load_words(deck_name)?;
             &loaded
         }
         Some(wr) => wr,
     };
     println!(
-        "\nSession: {} | Word count: {}\n",
-        session_name,
+        "\nDeck: {} | Word count: {}\n",
+        deck_name,
         words.words.len()
     );
     for word in &words.words {
@@ -241,9 +263,9 @@ fn print_all_w(w: Option<&Words>, session_name: &str) -> Result<()> {
     println!("\n\n");
     Ok(())
 }
-fn clear_all(session_name: &str) -> Result<()> {
+fn clear_all(deck_name: &str) -> Result<()> {
     let w = Words { words: vec![] };
-    w.save_words(session_name)?;
+    w.save_words(deck_name)?;
     Ok(())
 }
 
@@ -283,7 +305,7 @@ fn get_clipboard_text() -> Option<String> {
 use arboard::Clipboard;
 #[cfg(not(target_os = "linux"))]
 fn get_clipboard_text() -> Option<String> {
-    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+    if let Ok(mut clipboard) = Clipboard::new() {
         if let Ok(text) = clipboard.get_text() {
             return Some(text.trim().to_string());
         }
@@ -292,13 +314,14 @@ fn get_clipboard_text() -> Option<String> {
 }
 
 fn listen_to_clipboard(config: &Config) -> Result<()> {
-    let current_session = &config.active_session;
-    let words: Arc<Mutex<Words>> = Arc::new(Mutex::new(Words::load_words(current_session)?));
+    let current_deck = &config.active_deck;
+    let words: Arc<Mutex<Words>> = Arc::new(Mutex::new(Words::load_words(current_deck)?));
     let is_running = Arc::new(AtomicBool::new(true));
     let words_thread = Arc::clone(&words);
     let is_runnig_thread = Arc::clone(&is_running);
+    let cfg = config.clone();
 
-    println!("Active session: {}", current_session);
+    println!("Active deck: {}", current_deck);
 
     let thread_handle = thread::spawn(move || {
         let mut last_copied = get_clipboard_text().unwrap_or_default();
@@ -318,11 +341,11 @@ fn listen_to_clipboard(config: &Config) -> Result<()> {
                 }
             }
 
-            std::thread::sleep(Duration::from_secs_f32(2.0));
+            std::thread::sleep(Duration::from_secs_f32(cfg.seconds_check_clipboard));
         }
     });
     loop {
-        let user_input = input("enter q! to stop")?;
+        let user_input = input("enter q! to stop > \n")?;
 
         if user_input.as_str() == "q!" {
             is_running.store(false, Ordering::Relaxed);
@@ -331,15 +354,15 @@ fn listen_to_clipboard(config: &Config) -> Result<()> {
     }
     thread_handle.join().unwrap();
     let words_final = words.lock().unwrap();
-    words_final.save_words(current_session)?;
+    words_final.save_words(current_deck)?;
     Ok(())
 }
 
 fn run_loop(config: &Config) -> Result<()> {
-    let current_session = &config.active_session;
-    let mut words = Words::load_words(current_session)?;
+    let current_deck = &config.active_deck;
+    let mut words = Words::load_words(current_deck)?;
 
-    println!("Active session: {}", current_session);
+    println!("Active deck: {}", current_deck);
 
     loop {
         let user_input = input(&config.loop_message)?;
@@ -348,10 +371,10 @@ fn run_loop(config: &Config) -> Result<()> {
         }
         match user_input.as_str() {
             "q!" => {
-                words.save_words(current_session)?;
+                words.save_words(current_deck)?;
                 break;
             }
-            "a!" => print_all_w(Some(&words), current_session)?,
+            "a!" => print_all_w(Some(&words), current_deck)?,
             _ => {
                 if words.words.contains(&user_input) {
                     println!("already added");

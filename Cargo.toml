@@ -2,21 +2,40 @@
 name = "word_saver"
 version = "0.1.0"
 edition = "2024"
+authors = ["Lixtr <spetesq@gmail.com>"]
+description = "A minimalist CLI tool to collect words into decks"
+license = "MIT"
+readme = "readme.md"
+keywords = ["vocabulary", "clipboard", "anki", "cli", "language-learning"]
+categories = ["command-line-utilities", "text-processing", "education"]
+
 
 [[bin]]
 name = "ws"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1.0.102"
-serde = { version = "1.0.102", features = ["derive"] }
-toml = "1.1.2"
+anyhow = { version = "1.0.102", default-features = false, features = ["std"] }
+serde = { version = "1.0.102", default-features = false, features = [
+  "derive",
+  "std",
+] }
+toml = { version = "1.1.2", default-features = false, features = [
+  "serde",
+  "parse",
+  "display",
+] }
 dirs = "6.0.0"
-clap = { version = "4.6.1", features = ["derive"] }
-arboard = "3.6.1"
-clipboard-master = "4.0.0"
-crossterm = "0.29.0"
 
+clap = { version = "4.6.1", default-features = false, features = [
+  "std",
+  "derive",
+  "help",
+  "error-context",
+] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+arboard = { version = "3.6.1", default-features = false }
 
 [profile.release]
 opt-level = 3
