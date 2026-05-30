@@ -1,0 +1,18 @@
+[package]
+name = "ws"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+serde = { version = "1.0.102", features = ["derive"] }
+toml = "*"
+dirs = "*"
+
+
+[profile.release]
+opt-level = "z"
+codegen-units = 1
+strip = true
+lto = true
+panic = "abort"
