@@ -83,7 +83,7 @@ ws -n <name> # or ws new <name>
 
 ## Features
 
-- **Background Clipboard Listener (`-l`, `--listen`)**: Automatically copies words and saves them to your active session
+- **Background Clipboard Listener (`-l`, `listen`)**: Automatically copies words and saves them to your active deck
  `note : Currently, this works by polling the clipboard at regular intervals, I may later implement a daemon-based approach to detect when the clipboard contents have changed.`
 - **Duplication**: Automatically ignores duplicates, empty lines, and texts containing \n
 - **Decks**: Organize your vocabulary into different decks (e.g., `english`, `german`, `verbs`)
