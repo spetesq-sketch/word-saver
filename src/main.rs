@@ -7,8 +7,8 @@ use std::io::{Write, stdin, stdout};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "Ws", version, about = "a tiny program to save words")]
-struct Cil {
+#[command(name = "Ws", version, about = "a tiny program to keep words")]
+struct Cli {
     #[command(subcommand)]
     command: Command,
 }
@@ -44,15 +44,15 @@ enum Command {
 #[derive(Serialize, Deserialize)]
 struct Config {
     active_session: String,
-    loop_messange: String,
-    auto_swith: bool,
+    loop_message: String,
+    auto_switch: bool,
 }
 impl Default for Config {
     fn default() -> Self {
         Self {
             active_session: "default".to_string(),
-            loop_messange: "enter a word or q! - exit and save a! - print all words".to_string(),
-            auto_swith: true,
+            loop_message: "enter a word or q! - exit and save a! - print all words > ".to_string(),
+            auto_switch: true,
         }
     }
 }
@@ -89,11 +89,11 @@ fn main() -> Result<()> {
     let mut config = Config::load()?;
 
     if args.is_empty() {
-        run_loop(&mut config)?;
+        run_loop(&config)?;
     } else {
-        let cil = Cil::parse();
+        let cli = Cli::parse();
         let current = &config.active_session;
-        match cil.command {
+        match cli.command {
             Command::All => print_all_w(None, current)?,
             Command::Clear => clear_all(current)?,
             Command::Add { word } => {
@@ -111,13 +111,18 @@ fn main() -> Result<()> {
                 }
             }
             Command::New { name } => {
-                let words = Words { words: Vec::new() };
-                words.save_words(&name)?;
-                println!("Session: {} created", name);
-                if config.auto_swith {
-                    config.active_session = name.clone();
-                    println!("Switched to session: {}", name);
-                    config.save()?;
+                let path = get_session_path(&name)?;
+                if path.exists() {
+                    println!("Error: Session '{}' already exists!", name);
+                } else {
+                    let words = Words { words: Vec::new() };
+                    words.save_words(&name)?;
+                    println!("Session: {} created", name);
+                    if config.auto_switch {
+                        config.active_session = name.clone();
+                        println!("Switched to session: {}", name);
+                        config.save()?;
+                    }
                 }
             }
             Command::ChangeSession { name } => {
@@ -147,7 +152,7 @@ fn main() -> Result<()> {
                         }
                     }
                 }
-                println!("\n");
+                println!();
             }
         }
     }
@@ -170,15 +175,15 @@ impl Words {
         if !data_path.exists() {
             return Ok(Words { words: vec![] });
         }
-        let content = fs::read_to_string(&data_path).context("faled to read data file")?;
-        let worlds = toml::from_str(&content).context("faled to parse string to toml")?;
-        Ok(worlds)
+        let content = fs::read_to_string(&data_path).context("failed to read data file")?;
+        let words = toml::from_str(&content).context("failed to parse string to toml")?;
+        Ok(words)
     }
     fn save_words(&self, session_name: &str) -> Result<()> {
         let data_path = get_session_path(session_name)?;
         let string_content =
-            toml::to_string_pretty(&self).context("faled to prse toml to string")?;
-        fs::write(&data_path, &string_content).context("faled to write data")?;
+            toml::to_string_pretty(&self).context("failed to parse toml to string")?;
+        fs::write(&data_path, &string_content).context("failed to write data")?;
         Ok(())
     }
     fn add_word(&mut self, word: String) {
@@ -219,14 +224,14 @@ fn clear_all(session_name: &str) -> Result<()> {
     Ok(())
 }
 
-fn run_loop(config: &mut Config) -> Result<()> {
+fn run_loop(config: &Config) -> Result<()> {
     let current_session = &config.active_session;
     let mut words = Words::load_words(current_session)?;
 
     println!("Active session: {}", current_session);
 
     loop {
-        let user_input = input(&config.loop_messange)?;
+        let user_input = input(&config.loop_message)?;
         if user_input.is_empty() {
             continue;
         }

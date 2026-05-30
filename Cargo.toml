@@ -1,7 +1,11 @@
 [package]
-name = "ws"
+name = "word_saver"
 version = "0.1.0"
 edition = "2024"
+
+[[bin]]
+name = "ws"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.102"
@@ -12,7 +16,7 @@ clap = { version = "4.6.1", features = ["derive"] }
 
 
 [profile.release]
-opt-level = "z"
+opt-level = 3
 codegen-units = 1
 strip = true
 lto = true
