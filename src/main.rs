@@ -5,6 +5,7 @@ use std::env;
 use std::fs;
 use std::io::{Write, stdin, stdout};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -239,12 +240,12 @@ fn get_clipboard_text() -> Option<String> {
     if let Ok(output) = CdmCommand::new("wl-paste").arg("-n").output() {
         if output.status.success() {
             if let Ok(text) = String::from_utf8(output.stdout) {
-                return Some(text.trim().to_string());
+                Some(text.trim().to_string())
             } else {
-                return None;
+                None
             }
         } else {
-            return None;
+            None
         }
     } else if let Ok(output) = CdmCommand::new("xclip")
         .args(["-selection", "clipboard", "-o"])
@@ -252,7 +253,7 @@ fn get_clipboard_text() -> Option<String> {
     {
         if output.status.success() {
             if let Ok(text) = String::from_utf8(output.stdout) {
-                return Some(text.trim().to_string());
+                Some(text.trim().to_string())
             } else {
                 None
             }
@@ -278,26 +279,28 @@ fn get_clipboard_text() -> Option<String> {
 
 fn listen_to_clipboard(config: &Config) -> Result<()> {
     let current_session = &config.active_session;
-    let mut words: Arc<Mutex<Words>> = Arc::new(Mutex::new(Words::load_words(current_session)?));
+    let words: Arc<Mutex<Words>> = Arc::new(Mutex::new(Words::load_words(current_session)?));
+    let is_running = Arc::new(AtomicBool::new(true));
+    let words_thread = Arc::clone(&words);
+    let is_runnig_thread = Arc::clone(&is_running);
+
     println!("Active session: {}", current_session);
 
     let thread_handle = thread::spawn(move || {
-        let words_thread = Arc::clone(&words);
         let mut last_copied = get_clipboard_text().unwrap_or_default();
-        loop {
-            if let Some(clipboard_text) = get_clipboard_text() {
-                if !clipboard_text.is_empty()
-                    && clipboard_text != last_copied
-                    && !clipboard_text.contains('\n')
-                {
-                    last_copied = clipboard_text.clone();
+        while is_runnig_thread.load(Ordering::Relaxed) {
+            if let Some(clipboard_text) = get_clipboard_text()
+                && !clipboard_text.is_empty()
+                && !clipboard_text.contains('\n')
+                && clipboard_text != last_copied
+            {
+                last_copied = clipboard_text.clone();
 
-                    let mut words_guard = words_thread.lock().unwrap();
+                let mut words_guard = words_thread.lock().unwrap();
 
-                    if !words_guard.words.contains(&clipboard_text) {
-                        words_guard.add_word(clipboard_text.clone());
-                        println!("Added: {}", clipboard_text);
-                    }
+                if !words_guard.words.contains(&clipboard_text) {
+                    words_guard.add_word(clipboard_text.clone());
+                    println!("Added: {}", clipboard_text);
                 }
             }
 
@@ -306,11 +309,10 @@ fn listen_to_clipboard(config: &Config) -> Result<()> {
     });
     loop {
         let user_input = input("enter q! to stop")?;
-        match user_input.as_str() {
-            "q!" => {
-                break;
-            }
-            _ => {}
+
+        if user_input.as_str() == "q!" {
+            is_running.store(false, Ordering::Relaxed);
+            break;
         }
     }
     thread_handle.join().unwrap();
