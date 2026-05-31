@@ -226,8 +226,9 @@ impl Words {
     }
     fn save_words(&self, deck_name: &str) -> Result<()> {
         let data_path = get_deck_path(deck_name)?;
-        let string_content =
-            toml::to_string_pretty(&self).context("failed to parse toml to string")?;
+        let string_content = toml::to_string_pretty(&self)
+            .context("failed to parse toml to string")?
+            .to_lowercase();
         fs::write(&data_path, &string_content).context("failed to write data")?;
         Ok(())
     }
@@ -357,5 +358,5 @@ fn input(msg: &str) -> Result<String> {
     stdout().flush()?;
     let mut s = String::new();
     stdin().read_line(&mut s)?;
-    Ok(s.trim().to_string())
+    Ok(s.trim().to_string().to_lowercase())
 }
