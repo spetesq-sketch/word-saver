@@ -8,24 +8,9 @@ word saver or ws is a tiny CLI tool written in Rust, designed to help collect ne
 
 ### 1. System Dependencies (Linux Only)
 
-I couldn't figure out how to retrieve data from the clipboard on Wayland, so I used `std::process::Command` for Linux; therefore, please install `wl-clipboard` and `xclip`
+~~I couldn't figure out how to retrieve data from the clipboard on Wayland, so I used `std::process::Command` for Linux; therefore, please install `wl-clipboard` and `xclip`~~
 
-```bash
-# Arch Linux 
-sudo pacman -S wl-clipboard xclip 
-
-# Ubuntu / Debian 
-sudo apt install wl-clipboard xclip
-
-# Fedora
-sudo dnf install wl-clipboard xclip
-
-# openSUSE
-sudo zypper install wl-clipboard xclip
-
-# Void Linux
-sudo xbps-install -Su wl-clipboard xclip
-```
+Now it works nativly via `arboard` and `features = ["wayland-data-control"]`
 
 ## 2. Install via Cargo
 

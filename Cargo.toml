@@ -1,6 +1,6 @@
 [package]
 name = "word_saver"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["Lixtr <spetesq@gmail.com>"]
 description = "A minimalist CLI tool to collect words into decks"
@@ -35,8 +35,9 @@ clap = { version = "4.6.1", default-features = false, features = [
   "error-context",
 ] }
 
-[target.'cfg(not(target_os = "linux"))'.dependencies]
-arboard = { version = "3.6.1", default-features = false }
+arboard = { version = "3.6.1", default-features = false, features = [
+  "wayland-data-control",
+] }
 
 [profile.release]
 opt-level = 3

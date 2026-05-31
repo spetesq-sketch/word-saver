@@ -268,47 +268,12 @@ fn clear_all(deck_name: &str) -> Result<()> {
     w.save_words(deck_name)?;
     Ok(())
 }
-
-#[cfg(target_os = "linux")]
-use std::process::Command as CdmCommand;
-#[cfg(target_os = "linux")]
-fn get_clipboard_text() -> Option<String> {
-    if let Ok(output) = CdmCommand::new("wl-paste").arg("-n").output() {
-        if output.status.success() {
-            if let Ok(text) = String::from_utf8(output.stdout) {
-                Some(text.trim().to_string())
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    } else if let Ok(output) = CdmCommand::new("xclip")
-        .args(["-selection", "clipboard", "-o"])
-        .output()
-    {
-        if output.status.success() {
-            if let Ok(text) = String::from_utf8(output.stdout) {
-                Some(text.trim().to_string())
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
 use arboard::Clipboard;
-#[cfg(not(target_os = "linux"))]
 fn get_clipboard_text() -> Option<String> {
-    if let Ok(mut clipboard) = Clipboard::new() {
-        if let Ok(text) = clipboard.get_text() {
-            return Some(text.trim().to_string());
-        }
+    if let Ok(mut clipboard) = Clipboard::new()
+        && let Ok(text) = clipboard.get_text()
+    {
+        return Some(text.trim().to_string());
     }
     None
 }
