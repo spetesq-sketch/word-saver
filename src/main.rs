@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Parser)]
 #[command(name = "Ws", version, about = "a tiny program to keep words")]
@@ -29,11 +29,17 @@ enum Command {
     AllDecks,
     #[command(alias = "-cd")]
     /// change active deck
-    ChangeDeck { name: Vec<String> },
+    ChangeDeck {
+        #[arg(required = true)]
+        name: Vec<String>,
+    },
 
     /// delite deck toml or -rs
     #[command(alias = "-rd")]
-    RemoveDeck { name: Vec<String> },
+    RemoveDeck {
+        #[arg(required = true)]
+        name: Vec<String>,
+    },
 
     /// clear all words or -c
     #[command(alias = "-c")]
@@ -41,14 +47,23 @@ enum Command {
 
     /// remove word or -r
     #[command(alias = "-r")]
-    Remove { word: Vec<String> },
+    Remove {
+        #[arg(required = true)]
+        word: Vec<String>,
+    },
 
     /// add word if dont want to run loop
-    Add { word: Vec<String> },
+    Add {
+        #[arg(required = true)]
+        word: Vec<String>,
+    },
 
     #[command(alias = "-n")]
     /// create a new deck or -n
-    New { name: Vec<String> },
+    New {
+        #[arg(required = true)]
+        name: Vec<String>,
+    },
 
     #[command(alias = "-l")]
     /// listen to the clipboard and automatically add words from the clipboard or -l
@@ -56,11 +71,13 @@ enum Command {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(default)]
 struct Config {
     active_deck: String,
     loop_message: String,
     auto_switch: bool,
     seconds_check_clipboard: f32,
+    auto_save_time: f32,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -69,6 +86,7 @@ impl Default for Config {
             loop_message: "enter a word or q! - exit and save a! - print all words > ".to_string(),
             auto_switch: true,
             seconds_check_clipboard: 1.5,
+            auto_save_time: 3.0,
         }
     }
 }
@@ -88,8 +106,15 @@ impl Config {
             cfg.save()?;
             return Ok(cfg);
         }
+
         let content = fs::read_to_string(&path).context("failed to read config")?;
-        toml::from_str(&content).context("failed to parse config")
+        let cfg: Config = toml::from_str(&content).context("failed to parse config")?;
+        if !content.contains("auto_save_time") {
+            cfg.save()?;
+            println!("[Migration] Config file updated to the latest version.");
+        }
+
+        Ok(cfg)
     }
 
     fn save(&self) -> Result<()> {
@@ -112,7 +137,8 @@ impl Config {
             .replace(
                 "seconds_check_clipboard =",
                 "# Clipboard check interval in listen mode (-l) in seconds\nseconds_check_clipboard ="
-            );
+            )
+                .replace("auto_save_time =", "# Automatic saving during listen mode in minuts\nauto_save_time=");
 
         fs::write(&path, commented_content)?;
         Ok(())
@@ -137,12 +163,15 @@ fn main() -> Result<()> {
             Command::Add { word } => {
                 let final_phase = word.join(" ");
                 let mut words = Words::load_words(current)?;
+                if words.words.contains(&final_phase) {
+                    bail!("Already exists");
+                }
                 words.add_word(final_phase);
                 words.save_words(current)?;
             }
             Command::Remove { word } => {
                 let mut words = Words::load_words(current)?;
-                let final_phrase = word.join(" ");
+                let final_phrase = word.join(" ").to_lowercase();
                 if words.remove_word(&final_phrase) {
                     words.save_words(current)?;
                     println!("Removed");
@@ -237,14 +266,13 @@ impl Words {
     }
     fn save_words(&self, deck_name: &str) -> Result<()> {
         let data_path = get_deck_path(deck_name)?;
-        let string_content = toml::to_string_pretty(&self)
-            .context("failed to parse toml to string")?
-            .to_lowercase();
+        let string_content =
+            toml::to_string_pretty(&self).context("failed to parse toml to string")?;
         fs::write(&data_path, &string_content).context("failed to write data")?;
         Ok(())
     }
     fn add_word(&mut self, word: String) {
-        self.words.push(word);
+        self.words.push(word.trim().to_lowercase());
     }
 }
 
@@ -293,6 +321,7 @@ fn listen_to_clipboard(config: &Config) -> Result<()> {
     let mut clipboard = Clipboard::new().context("Couldnt connect to the clipboard")?;
     let thread_handle = thread::spawn(move || {
         let mut last_copied = get_clipboard_text(&mut clipboard).unwrap_or_default();
+        let mut last_save = Instant::now();
         while is_runnig_thread.load(Ordering::Relaxed) {
             if let Ok(clipboard_text) = get_clipboard_text(&mut clipboard)
                 && !clipboard_text.is_empty()
@@ -306,6 +335,19 @@ fn listen_to_clipboard(config: &Config) -> Result<()> {
                 if !words_guard.words.contains(&clipboard_text) {
                     words_guard.add_word(clipboard_text.clone());
                     println!("Added: {}", clipboard_text);
+                }
+            }
+            let last_save_time_min = last_save.elapsed().as_secs_f32() / 60.0;
+            if last_save_time_min > cfg.auto_save_time {
+                let words_guard = words_thread.lock().unwrap();
+                match words_guard.save_words(&cfg.active_deck) {
+                    Ok(_) => {
+                        println!("Auto save: {}", &cfg.active_deck);
+                        last_save = Instant::now()
+                    }
+                    Err(e) => {
+                        eprintln!("[Auto-save error] {}", e);
+                    }
                 }
             }
 
@@ -326,11 +368,7 @@ fn listen_to_clipboard(config: &Config) -> Result<()> {
             }
 
             _ => {
-                println!(
-                    "Unknown command use:\n
-                    q! - to exit\n
-                    a! - print all words"
-                )
+                println!("Unknown command :\nq! - to exit\na! - print all words")
             }
         }
     }
