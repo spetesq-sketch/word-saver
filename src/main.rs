@@ -1,5 +1,6 @@
 use anyhow::bail;
 use anyhow::{Context, Result};
+use arboard::Clipboard;
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use std::env;
@@ -28,11 +29,11 @@ enum Command {
     AllDecks,
     #[command(alias = "-cd")]
     /// change active deck
-    ChangeDeck { name: String },
+    ChangeDeck { name: Vec<String> },
 
     /// delite deck toml or -rs
     #[command(alias = "-rd")]
-    RemoveDeck { name: String },
+    RemoveDeck { name: Vec<String> },
 
     /// clear all words or -c
     #[command(alias = "-c")]
@@ -40,14 +41,14 @@ enum Command {
 
     /// remove word or -r
     #[command(alias = "-r")]
-    Remove { word: String },
+    Remove { word: Vec<String> },
 
     /// add word if dont want to run loop
     Add { word: Vec<String> },
 
     #[command(alias = "-n")]
     /// create a new deck or -n
-    New { name: String },
+    New { name: Vec<String> },
 
     #[command(alias = "-l")]
     /// listen to the clipboard and automatically add words from the clipboard or -l
@@ -128,7 +129,10 @@ fn main() -> Result<()> {
     } else {
         let cli = Cli::parse();
         match cli.command {
-            Command::All => print_all_w(None, current)?,
+            Command::All => {
+                let words = Words::load_words(current)?;
+                print_all_w(&words, current);
+            }
             Command::Clear => clear_all(current)?,
             Command::Add { word } => {
                 let final_phase = word.join(" ");
@@ -138,7 +142,8 @@ fn main() -> Result<()> {
             }
             Command::Remove { word } => {
                 let mut words = Words::load_words(current)?;
-                if words.remove_word(&word) {
+                let final_phrase = word.join(" ");
+                if words.remove_word(&final_phrase) {
                     words.save_words(current)?;
                     println!("Removed");
                 } else {
@@ -146,28 +151,33 @@ fn main() -> Result<()> {
                 }
             }
             Command::New { name } => {
-                let path = get_deck_path(&name)?;
+                let final_phrase = name.join(" ");
+                let path = get_deck_path(&final_phrase)?;
                 if path.exists() {
-                    println!("Error: Deck '{}' already exists!", name);
+                    println!("Error: Deck '{}' already exists!", &final_phrase);
                 } else {
                     let words = Words { words: Vec::new() };
-                    words.save_words(&name)?;
-                    println!("Deck: {} created", name);
+                    words.save_words(&final_phrase)?;
+                    println!("Deck: {} created", &final_phrase);
                     if config.auto_switch {
-                        config.active_deck = name.clone();
-                        println!("Switched to deck: {}", name);
+                        config.active_deck = final_phrase.clone();
+                        println!("Switched to deck: {}", &final_phrase);
                         config.save()?;
                     }
                 }
             }
             Command::ChangeDeck { name } => {
-                let path = get_deck_path(&name)?;
+                let final_phrase = name.join(" ");
+                let path = get_deck_path(&final_phrase)?;
                 if !path.exists() {
-                    println!("Deck '{}' does not exist. Use -n to create it.", name);
+                    println!(
+                        "Deck '{}' does not exist. Use -n to create it.",
+                        &final_phrase
+                    );
                 } else {
-                    config.active_deck = name.clone();
+                    config.active_deck = final_phrase.clone();
                     config.save()?;
-                    println!("Switched to deck '{}'.", name);
+                    println!("Switched to deck '{}'.", &final_phrase);
                 }
             }
             Command::AllDecks => {
@@ -191,13 +201,14 @@ fn main() -> Result<()> {
             }
             Command::Listen => listen_to_clipboard(&config)?,
             Command::RemoveDeck { name } => {
-                let path = get_deck_path(&name)?;
+                let final_pharse = name.join(" ");
+                let path = get_deck_path(&final_pharse)?;
                 if !path.exists() {
                     bail!("deck doesnt exist")
                 }
                 fs::remove_file(&path)
                     .with_context(|| format!("failed to remove: {}", &path.display()))?;
-                println!("Deck: {} removed", name);
+                println!("Deck: {} removed", &final_pharse);
             }
         }
     }
@@ -244,39 +255,29 @@ fn get_deck_path(name: &str) -> Result<PathBuf> {
     fs::create_dir_all(&path_folder)?;
     Ok(path_folder.join(format!("{}.toml", name,)))
 }
-fn print_all_w(w: Option<&Words>, deck_name: &str) -> Result<()> {
-    let loaded;
-    let words = match w {
-        None => {
-            loaded = Words::load_words(deck_name)?;
-            &loaded
-        }
-        Some(wr) => wr,
-    };
+fn print_all_w(words: &Words, deck_name: &str) {
     println!(
         "\nDeck: {} | Word count: {}\n",
         deck_name,
         words.words.len()
     );
+
     for word in &words.words {
         println!("{}", word);
     }
+
     println!("\n\n");
-    Ok(())
 }
 fn clear_all(deck_name: &str) -> Result<()> {
     let w = Words { words: vec![] };
     w.save_words(deck_name)?;
     Ok(())
 }
-use arboard::Clipboard;
-fn get_clipboard_text() -> Option<String> {
-    if let Ok(mut clipboard) = Clipboard::new()
-        && let Ok(text) = clipboard.get_text()
-    {
-        return Some(text.trim().to_string());
-    }
-    None
+fn get_clipboard_text(clipboard: &mut Clipboard) -> Result<String> {
+    let text = clipboard
+        .get_text()
+        .context("failed to get clipboard text")?;
+    Ok(text.trim().to_lowercase())
 }
 
 fn listen_to_clipboard(config: &Config) -> Result<()> {
@@ -289,10 +290,11 @@ fn listen_to_clipboard(config: &Config) -> Result<()> {
 
     println!("Active deck: {}", current_deck);
 
+    let mut clipboard = Clipboard::new().context("Couldnt connect to the clipboard")?;
     let thread_handle = thread::spawn(move || {
-        let mut last_copied = get_clipboard_text().unwrap_or_default();
+        let mut last_copied = get_clipboard_text(&mut clipboard).unwrap_or_default();
         while is_runnig_thread.load(Ordering::Relaxed) {
-            if let Some(clipboard_text) = get_clipboard_text()
+            if let Ok(clipboard_text) = get_clipboard_text(&mut clipboard)
                 && !clipboard_text.is_empty()
                 && !clipboard_text.contains('\n')
                 && clipboard_text != last_copied
@@ -313,9 +315,23 @@ fn listen_to_clipboard(config: &Config) -> Result<()> {
     loop {
         let user_input = input("enter q! to stop > \n")?;
 
-        if user_input.as_str() == "q!" {
-            is_running.store(false, Ordering::Relaxed);
-            break;
+        match user_input.as_str() {
+            "q!" => {
+                is_running.store(false, Ordering::Relaxed);
+                break;
+            }
+            "a!" => {
+                let words_guard = words.lock().unwrap();
+                print_all_w(&words_guard, current_deck);
+            }
+
+            _ => {
+                println!(
+                    "Unknown command use:\n
+                    q! - to exit\n
+                    a! - print all words"
+                )
+            }
         }
     }
     thread_handle.join().unwrap();
@@ -340,7 +356,9 @@ fn run_loop(config: &Config) -> Result<()> {
                 words.save_words(current_deck)?;
                 break;
             }
-            "a!" => print_all_w(Some(&words), current_deck)?,
+            "a!" => {
+                print_all_w(&words, current_deck);
+            }
             _ => {
                 if words.words.contains(&user_input) {
                     println!("already added");
