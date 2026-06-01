@@ -83,6 +83,8 @@ loop_message = "enter a word or q! - exit and save a! - print all words > "
 auto_switch = true
 # Clipboard check interval in listen mode (-l) in seconds
 seconds_check_clipboard = 1.5
+# Automatic saving during listen mode in minutes
+auto_save_time = 3.0
 ```
 
 ---

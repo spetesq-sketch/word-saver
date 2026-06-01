@@ -138,7 +138,7 @@ impl Config {
                 "seconds_check_clipboard =",
                 "# Clipboard check interval in listen mode (-l) in seconds\nseconds_check_clipboard ="
             )
-                .replace("auto_save_time =", "# Automatic saving during listen mode in minuts\nauto_save_time=");
+            .replace("auto_save_time =", "# Automatic saving during listen mode in minutes\nauto_save_time=");
 
         fs::write(&path, commented_content)?;
         Ok(())
